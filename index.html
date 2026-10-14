@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXUS STREAMING</title>
+<style>
+:root{--bg:#070d1a;--panel:#0e1a30;--line:#1d2f4f;--text:#e6f1ff;--mute:#8aa0bf;--cy:#2fd4ff;--bl:#2f7bff;--ok:#3ddc97;--warn:#ffc857;--bad:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 600px at 50% -220px,#10264d,var(--bg));color:var(--text);font:16px/1.45 "Segoe UI",system-ui,sans-serif;min-height:100vh}
+header{display:flex;align-items:center;gap:22px;padding:14px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.logo{font-weight:800;letter-spacing:.14em;font-size:20px;background:linear-gradient(90deg,var(--cy),var(--bl));-webkit-background-clip:text;background-clip:text;color:transparent}
+nav{display:flex;gap:6px;flex-wrap:wrap}
+.tab{background:none;border:0;color:var(--mute);padding:8px 14px;border-radius:999px;font:inherit;cursor:pointer}
+.tab.on{color:var(--text);background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
+main{padding:20px 22px 60px;max-width:1100px;margin:0 auto}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--cy);box-shadow:0 0 16px rgba(47,212,255,.55)}
+input,select,textarea{width:100%;background:#0a1426;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit}
+textarea{min-height:70px;resize:vertical}
+label{display:block;margin:12px 0 4px;color:var(--mute);font-size:14px}
+.btn{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font:inherit;cursor:pointer}
+.btn.pri{background:linear-gradient(90deg,var(--bl),var(--cy));color:#04101f;border:0;font-weight:700}
+.btn.bad{color:var(--bad)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.bar{display:flex;gap:10px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.card img,.noimg{width:100%;aspect-ratio:2/3;object-fit:cover;background:#0a1426;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:13px}
+.card .in{padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px;flex:1}
+.card h3{margin:0;font-size:15px}
+.mute{color:var(--mute);font-size:13px}
+.req{display:grid;grid-template-columns:110px 1fr;gap:16px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:16px}
+.req img{width:100%;border-radius:8px}
+.req h3{margin:0 0 2px}
+.chk{display:flex;gap:10px;align-items:flex-start;margin:6px 0;color:var(--text);font-size:14px}
+.chk input{width:auto;margin-top:3px}
+.gate{margin:14px 0;padding:10px 12px;border-radius:10px;background:#0a1426;border:1px solid var(--line);font-size:14px}
+.gate .b{color:var(--bad)}.gate .w{color:var(--warn)}.gate .ok{color:var(--ok)}
+.badge{display:inline-block;font-size:12px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);color:var(--mute)}
+.badge.approved{color:var(--ok);border-color:var(--ok)}.badge.revoked,.badge.declined{color:var(--bad);border-color:var(--bad)}.badge.pending{color:var(--warn);border-color:var(--warn)}
+.logrow{padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.empty{color:var(--mute);padding:40px 0;text-align:center}
+.player{position:fixed;inset:0;background:#000;z-index:9;display:flex;flex-direction:column}
+.player .top{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#050a14}
+.player iframe,.player video{flex:1;width:100%;border:0;background:#000}
+@media(max-width:620px){.req{grid-template-columns:1fr}.req img{max-width:120px}}
+@media(prefers-reduced-motion:no-preference){.card,.btn{transition:box-shadow .15s}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const KEY = 'nexus-watch-v1';
+const OPEN = ['pd', 'cc', 'permission'];
+const TYPES = {
+  pd: 'Public domain',
+  cc: 'Creative Commons',
+  permission: 'Permission from rights holder',
+  owned: 'Purchased or personal copy (your own source only)'
+};
+const CHECKS = {
+  pd: ['The source states public domain or CC0 for this exact film',
+       'I checked first-publication year and country',
+       'Restoration, score and subtitles are not separately copyrighted'],
+  cc: ['I saved the license URL',
+       'The creator or official page declares the license',
+       'I reviewed NC (non-commercial) and ND (no derivatives) limits'],
+  permission: ['Permission is in writing (email or signed note)',
+               'The sender is the rights holder or their agent',
+               'Permission covers streaming'],
+  owned: ['The receipt or library entry matches this title',
+          'I am supplying my own file or URL for playback',
+          'I checked format-shifting rules for my country']
+};
+
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.items) return s; } catch (e) {}
+  return {
+    settings: {
+      tmdbKey: '',
+      embedBase: 'https://vidsrc.dev/embed/movie/',
+      trusted: ['wikimedia.org', 'creativecommons.org', 'blender.org']
+    },
+    items: [], log: []
+  };
+}
+let S = load();
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function log(action, it, extra) {
+  S.log.unshift({ t: new Date().toISOString(), action, tmdbId: it.id, title: it.title,
+    license: it.license ? it.license.type : null, proof: it.license ? it.license.proofUrl : null, extra: extra || null });
+}
+
+function embedUrl(it) {
+  if (!it || it.status !== 'approved' || !it.license || !OPEN.includes(it.license.type)) return null;
+  return S.settings.embedBase + encodeURIComponent(it.id);
+}
+function sourceFor(it) {
+  if (!it || it.status !== 'approved') return null;
+  const u = (it.license.sourceUrl || '').trim();
+  if (u) return { url: u, kind: /\.(mp4|webm|m3u8|mkv)(\?|$)/i.test(u) ? 'video' : 'frame' };
+  const e = embedUrl(it);
+  return e ? { url: e, kind: 'frame' } : null;
+}
+
+function checkGate(it) {
+  const L = it.license, block = [], warn = [];
+  if (!L.type) block.push('Choose a license type');
+  else {
+    if (!CHECKS[L.type].every((_, i) => L.checks && L.checks[i])) block.push('Tick every checklist item');
+    if (L.type === 'owned' && !/^https?:\/\//i.test(L.sourceUrl || '')) block.push('Add your own source URL');
+  }
+  let u = null;
+  try { u = new URL(L.proofUrl); } catch (e) {}
+  if (!u) block.push('Add a proof link (full URL)');
+  else {
+    if (u.protocol !== 'https:') warn.push('Proof link is not https');
+    const host = u.hostname.replace(/^www\./, '');
+    if (!S.settings.trusted.some(d => host === d || host.endsWith('.' + d)))
+      warn.push(host + ' is not on your trusted domains list');
+    if (L.type === 'cc' && !/creativecommons\.org\/(licenses|publicdomain)\//i.test(L.proofUrl + ' ' + (L.note || '')))
+      warn.push('No Creative Commons license URL found in the proof link or note');
+    if (S.items.some(o => o !== it && o.license && o.license.proofUrl === L.proofUrl))
+      warn.push('The same proof link is used for another title');
+  }
+  if (!(L.note || '').trim()) block.push('Write what the proof shows');
+  return { block, warn };
+}
+
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in (props || {})) {
+    const v = props[k];
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k === 'value') e.value = v;
+    else if (k === 'checked') e.checked = !!v;
+    else if (k === 'disabled') e.disabled = !!v;
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+  }
+  kids.flat(Infinity).forEach(c => { if (c == null || c === false) return; e.append(c.nodeType ? c : document.createTextNode(c)); });
+  return e;
+}
+const IMG = 'https://image.tmdb.org/t/p/w342';
+const poster = (p, title) => p ? h('img', { src: IMG + p, alt: title, loading: 'lazy' }) : h('div', { class: 'noimg' }, 'No poster');
+
+let tab = 'search', query = '', results = [], msg = '';
+const app = document.getElementById('app');
+function render() { app.replaceChildren(header(), h('main', null, views[tab]())); }
+
+function header() {
+  const count = s => S.items.filter(i => i.status === s).length;
+  const tabs = [['search', 'Search'], ['requests', 'Requests (' + count('pending') + ')'],
+    ['library', 'Library (' + count('approved') + ')'], ['log', 'Audit log'], ['settings', 'Settings']];
+  return h('header', null, h('div', { class: 'logo' }, 'NEXUS STREAMING'),
+    h('nav', null, tabs.map(([k, label]) => h('button', { class: 'tab' + (tab === k ? ' on' : ''), onclick: () => { tab = k; render(); } }, label))));
+}
+
+async function doSearch(q) {
+  query = q;
+  if (!S.settings.tmdbKey) { msg = 'Add your TMDB API key in Settings first.'; return render(); }
+  if (!q.trim()) return;
+  msg = 'Searching…'; render();
+  try {
+    const r = await fetch('https://api.themoviedb.org/3/search/movie?include_adult=false&query=' +
+      encodeURIComponent(q) + '&api_key=' + encodeURIComponent(S.settings.tmdbKey));
+    if (!r.ok) throw new Error('TMDB returned ' + r.status + (r.status === 401 ? ' (check your API key)' : ''));
+    results = (await r.json()).results || [];
+    msg = results.length ? '' : 'No movies found for “' + q + '”.';
+  } catch (e) { msg = 'Search failed: ' + e.message; results = []; }
+  render();
+}
+
+function request(m) {
+  let it = S.items.find(i => i.id === m.id);
+  if (it) {
+    if (it.status === 'declined' || it.status === 'revoked') { it.status = 'pending'; log('re-requested', it); save(); }
+    return;
+  }
+  S.items.push({ id: m.id, title: m.title, year: (m.release_date || '').slice(0, 4), poster: m.poster_path,
+    overview: m.overview, status: 'pending', license: { type: '', proofUrl: '', note: '', sourceUrl: '', checks: {} } });
+  log('requested', S.items[S.items.length - 1]); save();
+}
+
+function searchView() {
+  const input = h('input', { type: 'search', placeholder: 'Search movies', value: query, 'aria-label': 'Search movies',
+    onkeydown: e => { if (e.key === 'Enter') doSearch(e.target.value); } });
+  return h('div', null,
+    h('div', { class: 'bar' }, input, h('button', { class: 'btn pri', onclick: () => doSearch(input.value) }, 'Search')),
+    msg && h('div', { class: 'empty' }, msg),
+    !msg && !results.length && h('div', { class: 'empty' }, 'Search any title. Nothing plays until you approve it with a license on record.'),
+    h('div', { class: 'grid' }, results.map(m => {
+      const it = S.items.find(i => i.id === m.id);
+      const st = it ? it.status : null;
+      return h('div', { class: 'card' }, poster(m.poster_path, m.title),
+        h('div', { class: 'in' }, h('h3', null, m.title), h('div', { class: 'mute' }, (m.release_date || '').slice(0, 4) || 'Year unknown'),
+          st && st !== 'declined' && st !== 'revoked'
+            ? h('span', { class: 'badge ' + st }, st === 'pending' ? 'Awaiting your review' : 'In library')
+            : h('button', { class: 'btn', onclick: () => { request(m); tab = 'requests'; render(); } }, st ? 'Request again' : 'Request')));
+    })));
+}
+
+function reqCard(it) {
+  const L = it.license;
+  const gate = h('div', { class: 'gate' });
+  const approve = h('button', { class: 'btn pri', onclick: () => {
+    const g = checkGate(it); if (g.block.length) return;
+    it.status = 'approved'; L.checkedAt = new Date().toISOString(); log('approved', it, g.warn.length ? g.warn : null); save(); render();
+  } }, 'Approve');
+  const fill = () => {
+    const g = checkGate(it);
+    gate.replaceChildren(...g.block.map(b => h('div', { class: 'b' }, 'Needed: ' + b)),
+      ...g.warn.map(w => h('div', { class: 'w' }, 'Warning: ' + w)),
+      ...(!g.block.length && !g.warn.length ? [h('div', { class: 'ok' }, 'All checks passed')] : []));
+    approve.disabled = !!g.block.length;
+  };
+  const field = (label, prop, extra) => [h('label', null, label),
+    h('input', Object.assign({ value: L[prop] || '', oninput: e => { L[prop] = e.target.value; save(); fill(); } }, extra || {}))];
+  const linkStatus = h('span', { class: 'mute' });
+  const checkLink = h('button', { class: 'btn', onclick: async () => {
+    linkStatus.textContent = 'Checking…';
+    try { await fetch(L.proofUrl, { mode: 'no-cors' }); linkStatus.textContent = 'Reachable (page content not verified)'; }
+    catch (e) { linkStatus.textContent = 'Could not reach this link'; }
+  } }, 'Check link');
+
+  fill();
+  return h('div', { class: 'req' }, poster(it.poster, it.title),
+    h('div', null,
+      h('h3', null, it.title), h('div', { class: 'mute' }, it.year || 'Year unknown'),
+      h('label', null, 'License type'),
+      h('select', { onchange: e => { L.type = e.target.value; L.checks = {}; save(); render(); } },
+        h('option', { value: '' }, 'Choose…'),
+        Object.keys(TYPES).map(k => h('option', { value: k, selected: L.type === k }, TYPES[k]))),
+      field('Proof link (license page, rights holder page, receipt)', 'proofUrl', { type: 'url', placeholder: 'https://' }),
+      h('div', { class: 'row', style: 'margin-top:8px' }, checkLink, linkStatus),
+      h('label', null, 'What the proof shows'),
+      h('textarea', { oninput: e => { L.note = e.target.value; save(); fill(); } }, L.note || ''),
+      field('Your own source URL' + (L.type === 'owned' ? ' (required)' : ' (optional; replaces the vidsrc embed)'), 'sourceUrl', { type: 'url', placeholder: 'https://' }),
+      L.type && h('div', { style: 'margin-top:12px' }, CHECKS[L.type].map((c, i) =>
+        h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!(L.checks && L.checks[i]),
+          onchange: e => { L.checks = L.checks || {}; L.checks[i] = e.target.checked; save(); fill(); } }), c))),
+      gate,
+      h('div', { class: 'row' }, approve,
+        h('button', { class: 'btn bad', onclick: () => { it.status = 'declined'; log('declined', it); save(); render(); } }, 'Decline'))));
+}
+
+function requestsView() {
+  const p = S.items.filter(i => i.status === 'pending');
+  return p.length ? h('div', null, p.map(reqCard)) : h('div', { class: 'empty' }, 'No requests waiting. Search for a title and tap Request.');
+}
+
+function libraryView() {
+  const a = S.items.filter(i => i.status === 'approved' || i.status === 'revoked');
+  if (!a.length) return h('div', { class: 'empty' }, 'Your library is empty. Approved titles appear here.');
+  return h('div', { class: 'grid' }, a.map(it => h('div', { class: 'card' }, poster(it.poster, it.title),
+    h('div', { class: 'in' }, h('h3', null, it.title),
+      h('span', { class: 'badge ' + it.status }, it.status === 'approved' ? TYPES[it.license.type].split(' (')[0] : 'Approval revoked'),
+      it.status === 'approved'
+        ? h('div', { class: 'row' },
+            h('button', { class: 'btn pri', onclick: () => play(it) }, 'Play'),
+            h('button', { class: 'btn bad', onclick: () => { it.status = 'revoked'; log('revoked', it); save(); render(); } }, 'Revoke'))
+        : h('button', { class: 'btn', onclick: () => { it.status = 'pending'; log('sent back for review', it); save(); tab = 'requests'; render(); } }, 'Review again')))));
+}
+
+function logView() {
+  const exp = () => {
+    const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), approvals: S.items.filter(i => i.status === 'approved'), log: S.log }, null, 2)], { type: 'application/json' });
+    const a = h('a', { href: URL.createObjectURL(blob), download: 'nexus-streaming-license-log.json' }); document.body.append(a); a.click(); a.remove();
+  };
+  return h('div', null, h('div', { class: 'row', style: 'margin-bottom:10px' }, h('button', { class: 'btn', onclick: exp }, 'Export log')),
+    S.log.length ? S.log.map(e => h('div', { class: 'logrow' },
+      h('strong', null, e.action), ' · ', e.title, ' ', h('span', { class: 'mute' }, new Date(e.t).toLocaleString()),
+      e.license && h('div', { class: 'mute' }, TYPES[e.license] + (e.proof ? ' · ' + e.proof : '')),
+      e.extra && h('div', { class: 'mute' }, 'Warnings at approval: ' + e.extra.join('; '))))
+      : h('div', { class: 'empty' }, 'Nothing logged yet.'));
+}
+
+function settingsView() {
+  const T = S.settings;
+  const key = h('input', { type: 'password', value: T.tmdbKey, placeholder: 'TMDB v3 API key' });
+  const base = h('input', { value: T.embedBase });
+  const trusted = h('textarea', null, T.trusted.join('\n'));
+  const saved = h('span', { class: 'mute' });
+  return h('div', { style: 'max-width:560px' },
+    h('label', null, 'TMDB API key'), key,
+    h('label', null, 'Embed base URL (the film’s TMDB id is appended)'), base,
+    h('label', null, 'Trusted proof domains (one per line)'), trusted,
+    h('div', { class: 'row', style: 'margin-top:14px' }, h('button', { class: 'btn pri', onclick: () => {
+      T.tmdbKey = key.value.trim(); T.embedBase = base.value.trim();
+      T.trusted = trusted.value.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
+      save(); saved.textContent = 'Saved';
+    } }, 'Save settings'), saved),
+    h('p', { class: 'mute', style: 'margin-top:24px' }, 'This product uses the TMDB API but is not endorsed or certified by TMDB. Your key and records are stored only on this device.'));
+}
+
+const views = { search: searchView, requests: requestsView, library: libraryView, log: logView, settings: settingsView };
+
+function play(it) {
+  const s = sourceFor(it);
+  if (!s) return;
+  const media = s.kind === 'video'
+    ? h('video', { src: s.url, controls: true, autoplay: true })
+    : h('iframe', { src: s.url, allowfullscreen: true, referrerpolicy: 'no-referrer',
+        allow: 'autoplay; fullscreen; encrypted-media',
+        sandbox: 'allow-scripts allow-same-origin allow-presentation allow-fullscreen' });
+  const close = () => { ov.remove(); document.removeEventListener('keydown', esc); };
+  const esc = e => { if (e.key === 'Escape' || e.key === 'Backspace') close(); };
+  const ov = h('div', { class: 'player' },
+    h('div', { class: 'top' }, h('strong', null, it.title), h('button', { class: 'btn', onclick: close }, 'Close')), media);
+  document.addEventListener('keydown', esc);
+  document.body.append(ov);
+  ov.querySelector('button').focus();
+}
+
+render();
+</script>
+</body>
+</html>
