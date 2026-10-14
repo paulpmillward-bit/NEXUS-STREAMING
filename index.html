@@ -314,7 +314,8 @@ function play(it) {
     document.body.append(ov0); ov0.querySelector('button').focus(); return;
   }
   const media = s.kind === 'video'
-    ? h('video', { src: s.url, controls: true, autoplay: true })
+    ? h('video', { src: s.url, controls: true, autoplay: true, playsinline: true,
+        onerror: e => { const c = e.target.error; ov.querySelector('.top strong').textContent = it.title + ' (could not play, code ' + (c ? c.code : '?') + ')'; } })
     : h('iframe', { src: s.url, allowfullscreen: true, referrerpolicy: 'no-referrer',
         allow: 'autoplay; fullscreen; encrypted-media',
         sandbox: 'allow-scripts allow-same-origin allow-presentation allow-fullscreen' });
