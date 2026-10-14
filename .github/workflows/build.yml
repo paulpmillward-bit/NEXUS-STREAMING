@@ -1,0 +1,196 @@
+name: Build NEXUS STREAMING
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Keep the same signing key between builds
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: nexus-streaming-debug-keystore
+      - name: Generate Android project
+        run: |
+          set -e
+          mkdir -p app/src/main/java/com/nexus/streaming app/src/main/res/values app/src/main/res/drawable app/src/main/assets
+          cp index.html app/src/main/assets/index.html
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "NEXUS-STREAMING"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.nexus.streaming'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.nexus.streaming'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '0.1'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-feature android:name="android.software.leanback" android:required="false"/>
+              <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+              <application
+                  android:label="NEXUS STREAMING"
+                  android:banner="@drawable/banner"
+                  android:theme="@style/Theme.Nexus">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Theme.Nexus" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <item name="android:windowBackground">#070D1A</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/banner.xml <<'EOF'
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <gradient android:startColor="#070D1A" android:endColor="#2F7BFF" android:angle="315"/>
+          </shape>
+          EOF
+
+          cat > app/src/main/java/com/nexus/streaming/MainActivity.kt <<'EOF'
+          package com.nexus.streaming
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.view.View
+          import android.webkit.WebChromeClient
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.FrameLayout
+
+          class MainActivity : Activity() {
+              private lateinit var web: WebView
+              private lateinit var root: FrameLayout
+              private var customView: View? = null
+              private var customCallback: WebChromeClient.CustomViewCallback? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  root = FrameLayout(this)
+                  web = WebView(this)
+                  web.setBackgroundColor(0xFF070D1A.toInt())
+                  root.addView(web, FrameLayout.LayoutParams(-1, -1))
+                  setContentView(root)
+
+                  with(web.settings) {
+                      javaScriptEnabled = true
+                      domStorageEnabled = true
+                      mediaPlaybackRequiresUserGesture = false
+                      javaScriptCanOpenWindowsAutomatically = false
+                      setSupportMultipleWindows(false)
+                  }
+                  web.webViewClient = object : WebViewClient() {
+                      override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean =
+                          r.isForMainFrame && r.url.scheme != "file"
+                  }
+                  web.webChromeClient = object : WebChromeClient() {
+                      override fun onShowCustomView(view: View, cb: CustomViewCallback) {
+                          customView = view
+                          customCallback = cb
+                          root.addView(view, FrameLayout.LayoutParams(-1, -1))
+                          web.visibility = View.GONE
+                      }
+                      override fun onHideCustomView() = hideCustom()
+                  }
+                  web.loadUrl("file:///android_asset/index.html")
+              }
+
+              private fun hideCustom() {
+                  customView?.let { root.removeView(it) }
+                  customView = null
+                  web.visibility = View.VISIBLE
+                  customCallback?.onCustomViewHidden()
+                  customCallback = null
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {
+                  if (customView != null) { hideCustom(); return }
+                  web.evaluateJavascript(
+                      "(function(){var p=document.querySelector('.player');if(p){p.querySelector('button').click();return 1}return 0})()"
+                  ) { r -> if (r != "1") finish() }
+              }
+
+              override fun onPause() { super.onPause(); web.onPause() }
+              override fun onResume() { super.onResume(); web.onResume() }
+              override fun onDestroy() { web.destroy(); super.onDestroy() }
+          }
+          EOF
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEXUS-STREAMING-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish release for Downloader
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest app/build/outputs/apk/debug/app-debug.apk --title "Latest build" --notes "Debug build"
